@@ -1,0 +1,10 @@
+# Smart Bank Reconciliation - Python (Colab / local) dependencies
+# The dashboard (reconciliation.html) needs no installation.
+
+pandas>=2.0      # 2.0+ required: pd.to_datetime(..., format="mixed")
+numpy>=1.24
+
+# Optional: only if you run reconcile_colab.py outside Google Colab
+# (Colab already ships pandas, numpy and the google.colab helper)
+notebook>=7.0
+ipython>=8.0     # provides display() in notebooks

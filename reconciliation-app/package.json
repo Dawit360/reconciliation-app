@@ -1,0 +1,37 @@
+{
+  "name": "smart-bank-reconciliation",
+  "version": "1.0.0",
+  "description": "Smart bank reconciliation: Windows, Android, iOS and web (PWA)",
+  "main": "electron/main.js",
+  "author": "Your Company",
+  "scripts": {
+    "serve": "npx http-server app -p 8080",
+    "start": "electron .",
+    "dist:win": "electron-builder --win",
+    "android:add": "cap add android && cap sync android",
+    "android:open": "cap open android",
+    "ios:add": "cap add ios && cap sync ios",
+    "ios:open": "cap open ios",
+    "sync": "cap sync"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/core": "^6.1.0",
+    "@capacitor/filesystem": "^6.0.0",
+    "@capacitor/ios": "^6.1.0",
+    "@capacitor/share": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.0",
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.example.bankreconciliation",
+    "productName": "Smart Bank Reconciliation",
+    "directories": { "output": "dist" },
+    "files": ["app/**", "electron/**", "package.json"],
+    "win": { "target": "nsis", "icon": "app/icon-512.png" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}

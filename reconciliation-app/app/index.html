@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smart Bank Reconciliation</title>
+<link rel="manifest" href="manifest.webmanifest"><meta name="theme-color" content="#2f6fed">
+<meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Reconcile"><link rel="apple-touch-icon" href="apple-touch-icon.png">
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mut:#6b7380;--bd:#e3e6ea;--ok:#1a9f5c;--rv:#d98a00;--bad:#d64545;--ac:#2f6fed;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#111418;--card:#1a1f26;--tx:#e8ebef;--mut:#8f98a5;--bd:#2a313b;--ok:#3ccf86;--rv:#f0a82e;--bad:#f06a6a;--ac:#6c9bff;color-scheme:dark}}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.w{max-width:1100px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0 0 2px}.s{color:var(--mut);font-size:13px;margin:0 0 14px}
+.g{display:grid;gap:10px}.k{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px}
+.kv{font-size:24px;font-weight:650}.kl{color:var(--mut);font-size:12px}
+.bar{display:flex;height:10px;border-radius:6px;overflow:hidden;background:var(--bd);margin-top:8px}
+.bar i{display:block}
+.ctl{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:12px 0}
+label{font-size:12px;color:var(--mut);display:block}input[type=range]{width:100%}
+button,.btn{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:8px;padding:6px 10px;cursor:pointer}
+button.p{background:var(--ac);color:#fff;border-color:var(--ac)}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin:12px 0}.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:640px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--bd);vertical-align:top}th{font-size:12px;color:var(--mut)}
+.bd{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;color:#fff}
+.Matched{background:var(--ok)}.Review{background:var(--rv)}.Unmatched{background:var(--bad)}
+.n{text-align:right;font-variant-numeric:tabular-nums}.m{color:var(--mut);font-size:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+</style></head><body><div class="w">
+<h1>Smart Bank Reconciliation</h1>
+<p class="s">Auto-matches ledger entries to bank lines by amount, date and description. You only review the doubtful ones.</p>
+<div class="g k" id="kpi"></div>
+<div class="c" style="margin-top:10px"><div class="kl">Reconciliation progress</div><div class="bar" id="bar"></div></div>
+<div class="c" id="ev" style="margin-top:10px"></div>
+<div class="c ctl">
+<div><label>Auto-match above: <b id="v1"></b></label><input type="range" id="t1" min="50" max="100" value="70"></div>
+<div><label>Review above: <b id="v2"></b></label><input type="range" id="t2" min="20" max="90" value="50"></div>
+<div><label>Date window ± <b id="v3"></b> days</label><input type="range" id="t3" min="0" max="10" value="4"></div>
+<div><label>Amount tolerance: <b id="v4"></b></label><input type="range" id="t4" min="0" max="500" value="0"></div>
+<div><label>Amount tolerance %: <b id="v5"></b> (review only)</label><input type="range" id="t5" min="0" max="10" value="5"></div>
+</div>
+<div class="row">
+<label class="btn">Ledger CSV<input type="file" id="fl" accept=".csv" hidden></label>
+<label class="btn">Bank CSV<input type="file" id="fb" accept=".csv" hidden></label>
+<button id="smp">Load sample</button><button id="appr">Approve all review</button>
+<button class="p" id="exp">Export CSV</button></div>
+<div class="row"><label><input type="checkbox" id="flip"> Flip bank signs (if bank shows debits as positive)</label></div>
+<p class="m">CSV files are cleaned automatically: any delimiter, flexible column names, mixed date and number formats, separate debit/credit columns. Data stays in your browser.</p>
+<div class="c m" id="rep" style="display:none;margin-top:8px"></div>
+<div class="tabs" id="tabs"></div>
+<div class="c tw"><table><thead><tr><th>Ledger</th><th>Bank</th><th class="n">Score</th><th>Status</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>
+</div>
+<script>
+let L=[],B=[],R=[],ov={},tab='All';
+const $=id=>document.getElementById(id);
+const fmt=n=>(n<0?'-':'')+Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const day=d=>new Date(d).getTime()/864e5;
+const STOP=new Set('trf transfer pos ref payment pmt purchase card debit credit ach eft atm web online the and for to of inv invoice'.split(' '));
+const tok=s=>new Set(s.toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/([a-z])(\d)/g,'$1 $2').replace(/(\d)([a-z])/g,'$1 $2').split(/\s+/).filter(w=>w.length>1&&!STOP.has(w)));
+function sim(a,b){const x=tok(a),y=tok(b);if(!x.size||!y.size)return 0;let i=0;x.forEach(w=>{if(y.has(w))i++});return i/(x.size+y.size-i)}
+function sample(){
+const names=['Acme Supplies','Blue Nile Logistics','Habesha Foods','Addis Telecom','City Power Utility','Office Rent','Payroll Batch','Zemen Consulting','Fuel Station','Print House'];
+L=[];B=[];let s=7;const r=()=>(s=(s*9301+49297)%233280)/233280;
+for(let i=0;i<40;i++){const n=names[i%10],a=-Math.round((200+r()*9000)*100)/100,d=new Date(2026,9,1+Math.floor(r()*28));
+const ds=d.toISOString().slice(0,10);L.push({id:'L'+(i+1),date:ds,desc:'INV-'+(1000+i)+' '+n,amt:a});
+const q=r();if(q<.15)continue;const sh=q<.6?0:Math.floor(r()*5)-1;const d2=new Date(d.getTime()+sh*864e5).toISOString().slice(0,10);
+B.push({id:'B'+(i+1),date:d2,desc:q<.6?'TRF '+n.toUpperCase()+' REF'+(1000+i):(q<.85?n.split(' ')[0]+' payment':'POS '+Math.floor(r()*9999)),amt:q>.93?a+37.5:a})}
+B.push({id:'B91',date:'2026-10-30',desc:'MONTHLY BANK CHARGE',amt:-45},{id:'B92',date:'2026-10-31',desc:'INTEREST CREDIT',amt:12.8});run()}
+function combo(a,k,tg){let hit=null;const cur=[];(function f(s,sum){if(hit)return;if(cur.length===k){if(Math.abs(sum-tg)<.005)hit=cur.slice();return}for(let x=s;x<a.length;x++){cur.push(a[x]);f(x+1,sum+L[a[x]].amt);cur.pop()}})(0,0);return hit}
+function run(){
+const t1=$('t1').value/100,t2=$('t2').value/100,w=+$('t3').value,tol=+$('t4').value/100,tp=$('t5').value/100;
+$('v1').textContent=Math.round(t1*100)+'%';$('v2').textContent=Math.round(t2*100)+'%';$('v3').textContent=w;$('v4').textContent=tol.toFixed(2);$('v5').textContent=Math.round(tp*100)+'%';
+const Lt=L.map(x=>tok(x.desc)),Bt=B.map(x=>tok(x.desc)),Ld=L.map(x=>day(x.date)),Bd=B.map(x=>day(x.date));
+const rf=t=>new Set([...t].filter(x=>/^\d{3,}$/.test(x))),Lr=Lt.map(rf),Br=Bt.map(rf);
+const ts=(a,b)=>{if(!a.size||!b.size)return 0;let i=0;a.forEach(x=>{if(b.has(x))i++});return .5*i/(a.size+b.size-i)+.5*i/Math.min(a.size,b.size)};
+const hasRef=(a,b)=>{for(const x of a)if(b.has(x))return true;return false};
+const ord=B.map((_,j)=>j).sort((a,b)=>B[a].amt-B[b].amt);
+const lb=v=>{let lo=0,hi=ord.length;while(lo<hi){const m=(lo+hi)>>1;if(B[ord[m]].amt<v)lo=m+1;else hi=m}return lo};
+const C=[];
+L.forEach((l,i)=>{const t=Math.max(tol,tp*Math.abs(l.amt));for(let p=lb(l.amt-t-1e-9);p<ord.length&&B[ord[p]].amt<=l.amt+t+1e-9;p++){const j=ord[p],dd=Math.abs(Ld[i]-Bd[j]);if(dd>w)continue;
+const ex=Math.abs(l.amt-B[j].amt)<.005,s=ts(Lt[i],Bt[j]),r=hasRef(Lr[i],Br[j]);if(!ex&&s===0&&!r)continue;
+C.push({sc:.35*s+.25*(1-dd/(w+1))+.2*(ex?1:.5)+.2*(r?1:0),i,j,ex})}});
+const byl={},byb={};C.forEach(c=>{(byl[c.i]=byl[c.i]||[]).push(c);(byb[c.j]=byb[c.j]||[]).push(c)});
+const comp=(arr,c)=>{let m=0;arr.forEach(o=>{if(o!==c&&o.sc>m)m=o.sc});return m};
+C.forEach(c=>{const cp=Math.max(comp(byl[c.i],c),comp(byb[c.j],c)),bn=.25*Math.max(0,(c.sc-cp)/c.sc)*(Math.abs(L[c.i].amt)%10<1e-9?.5:1);c.f=c.ex?Math.min(1,c.sc+bn):Math.min(1,c.sc+bn,t1-1e-6)});
+C.sort((a,b)=>b.f-a.f);const ul=new Set(),ub=new Set();R=[];
+const st=s=>s>=t1?'Matched':s>=t2?'Review':'Unmatched';
+C.forEach(c=>{if(ul.has(c.i)||ub.has(c.j)||c.f<t2*.6)return;ul.add(c.i);ub.add(c.j);R.push({l:L[c.i],b:B[c.j],sc:c.f,st:st(c.f),ty:''})});
+R=R.filter(x=>x.st!=='Unmatched');
+for(let j=0;j<B.length;j++){if(ub.has(j))continue;const near=[];
+for(let i=0;i<L.length&&near.length<12;i++){if(ul.has(i)||L[i].amt*B[j].amt<=0||Math.abs(L[i].amt)>=Math.abs(B[j].amt)||Math.abs(Ld[i]-Bd[j])>w+3)continue;if(ts(Lt[i],Bt[j])>0||hasRef(Lr[i],Br[j]))near.push(i)}
+for(let k=2;k<=4&&near.length>=k;k++){const hit=combo(near,k,B[j].amt);if(hit){ub.add(j);const sc=Math.min(.95,.6+.3*hit.reduce((a,i)=>a+ts(Lt[i],Bt[j]),0)/hit.length);hit.forEach(i=>{ul.add(i);R.push({l:L[i],b:B[j],sc,st:'Review',ty:'split'})});break}}}
+const mi=new Set(R.map(x=>x.l.id)),mb=new Set(R.map(x=>x.b.id));
+L.forEach(l=>{if(!mi.has(l.id))R.push({l,b:null,sc:0,st:'Unmatched'})});
+B.forEach(b=>{if(!mb.has(b.id))R.push({l:null,b,sc:0,st:'Unmatched'})});
+R.forEach(x=>{const k=(x.l?x.l.id:'')+'|'+(x.b?x.b.id:'');if(ov[k])x.st=ov[k];x.k=k});draw()}
+function draw(){
+const c=s=>R.filter(x=>x.st===s).length,ub=R.filter(x=>x.st==='Unmatched'&&!x.l).length,ul=R.filter(x=>x.st==='Unmatched'&&!x.l===false).length;
+const tot=R.length||1,m=c('Matched'),rv=c('Review'),un=c('Unmatched');
+const gap=R.filter(x=>x.st==='Unmatched').reduce((a,x)=>a+(x.l?x.l.amt:0)-(x.b?x.b.amt:0)*0-(x.b?x.b.amt:0),0);
+const hrs=((m*2+rv*0.5)/60).toFixed(1);
+$('kpi').innerHTML=[['Auto-matched',m,'var(--ok)'],['Needs review',rv,'var(--rv)'],['Unmatched',un,'var(--bad)'],['Match rate',Math.round(100*m/Math.max(1,L.length))+'%',''],['Audit time saved',hrs+' h','']].map(a=>`<div class="c"><div class="kv" style="color:${a[2]}">${a[1]}</div><div class="kl">${a[0]}</div></div>`).join('');
+$('bar').innerHTML=`<i style="width:${100*m/tot}%;background:var(--ok)"></i><i style="width:${100*rv/tot}%;background:var(--rv)"></i><i style="width:${100*un/tot}%;background:var(--bad)"></i>`;
+const ap=R.filter(x=>ov[x.k]==='Matched').length,rj=R.filter(x=>ov[x.k]==='Unmatched').length,au=R.filter(x=>x.st==='Matched'&&!ov[x.k]).length;
+const lo=R.filter(x=>x.st==='Unmatched'&&x.l&&!x.b).length,bo=R.filter(x=>x.st==='Unmatched'&&x.b&&!x.l).length,nL=L.length||1,pc=(a,b)=>b?Math.round(100*a/b)+'%':'\u2013';
+const ev=[['Auto-matched, no human touch',au],['Approved by reviewer',ap],['Rejected by reviewer',rj],['Awaiting review',rv],['Ledger only (no bank line)',lo],['Bank only (no ledger entry)',bo]];
+$('ev').innerHTML=`<div class="kl" style="margin-bottom:6px">Evaluation matrix (from your review decisions)</div><div class="tw"><table style="min-width:0"><tbody>${ev.map(r=>`<tr><td>${r[0]}</td><td class="n">${r[1]}</td></tr>`).join('')}</tbody></table></div><div class="row" style="margin-top:8px"><span>Review accuracy: <b>${pc(ap,ap+rj)}</b></span><span>Straight-through: <b>${pc(au,nL)}</b></span><span>Still needs a human: <b>${pc(rv+lo,nL)}</b></span></div><div class="m" style="margin-top:6px">Review accuracy = suggestions you approved \u00f7 suggestions you decided. True precision and recall need known answers, and auto-matches are not verified here. Spot-check some, or run evaluate.py.</div>`;
+const tabs=['All','Matched','Review','Unmatched'];
+$('tabs').innerHTML=tabs.map(t=>`<button class="${t===tab?'on':''}" onclick="tab='${t}';draw()">${t}</button>`).join('');
+const rows=R.filter(x=>tab==='All'||x.st===tab).sort((a,b)=>({Review:0,Unmatched:1,Matched:2}[a.st]-{Review:0,Unmatched:1,Matched:2}[b.st]));
+const cell=e=>e?`${e.desc}<div class="m">${e.date} · ${fmt(e.amt)}</div>`:'<span class="m">no counterpart</span>';
+$('tb').innerHTML=rows.map(x=>`<tr><td>${cell(x.l)}</td><td>${cell(x.b)}</td><td class="n">${x.b&&x.l?Math.round(x.sc*100)+'%':'–'}</td><td><span class="bd ${x.st}">${x.st}</span>${x.ty?' <span class="m">split</span>':''}</td><td>${x.st==='Review'?`<button onclick="set('${x.k}','Matched')">Approve</button> <button onclick="set('${x.k}','Unmatched')">Reject</button>`:''}</td></tr>`).join('')||'<tr><td colspan=5 class="m">Nothing here.</td></tr>'}
+function set(k,s){ov[k]=s;const x=R.find(r=>r.k===k);x.st=s;draw()}
+const MON='jan feb mar apr may jun jul aug sep oct nov dec'.split(' ');
+function splitLine(s,d){const o=[];let c='',q=0;for(let i=0;i<s.length;i++){const ch=s[i];if(ch==='"'){if(q&&s[i+1]==='"'){c+='"';i++}else q=!q}else if(ch===d&&!q){o.push(c);c=''}else c+=ch}o.push(c);return o.map(x=>x.trim())}
+function parseNum(v){if(v==null)return NaN;let s=String(v).trim();if(!s)return NaN;const neg=/^\(.*\)$/.test(s)||/-\s*$/.test(s)||/^-/.test(s)||/\bDR\b/i.test(s),cr=/\bCR\b/i.test(s);s=s.replace(/[^\d.,]/g,'');if(!s)return NaN;const lc=s.lastIndexOf(','),ld=s.lastIndexOf('.');
+if(lc>-1&&ld>-1)s=lc>ld?s.replace(/\./g,'').replace(',','.'):s.replace(/,/g,'');else if(lc>-1)s=(s.match(/,/g)||[]).length===1&&/,\d{1,2}$/.test(s)?s.replace(',','.'):s.replace(/,/g,'');else if((s.match(/\./g)||[]).length>1)s=s.replace(/\./g,'');
+const n=parseFloat(s);return isNaN(n)?NaN:(neg&&!cr?-n:n)}
+function iso(y,m,d){if(m<1||m>12||d<1||d>31)return null;return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0')}
+function dateFmt(v){let a=0,b=0;v.forEach(x=>{const m=String(x).match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-]\d{2,4}/);if(m){if(+m[1]>12)a++;if(+m[2]>12)b++}});return b>a?'mdy':'dmy'}
+function parseDate(v,f){const s=String(v||'').trim();if(!s)return null;let m;
+if(m=s.match(/^(\d{4})[\/.\-](\d{1,2})[\/.\-](\d{1,2})/))return iso(+m[1],+m[2],+m[3]);
+if(m=s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})/)){let a=+m[1],b=+m[2],y=+m[3];if(y<100)y+=2000;return f==='mdy'?iso(y,a,b):iso(y,b,a)}
+if(m=s.match(/^(\d{1,2})[ \-\/]([A-Za-z]{3})[a-z]*[ \-\/,]*(\d{2,4})/)){let y=+m[3];if(y<100)y+=2000;const i=MON.indexOf(m[2].toLowerCase());return i<0?null:iso(y,i+1,+m[1])}
+if(m=s.match(/^([A-Za-z]{3})[a-z]*\.? (\d{1,2}),? (\d{4})/)){const i=MON.indexOf(m[1].toLowerCase());return i<0?null:iso(+m[3],i+1,+m[2])}
+if(/^\d{5}(\.\d+)?$/.test(s))return new Date(Math.round((+s-25569)*864e5)).toISOString().slice(0,10);
+const d=new Date(s);return isNaN(d)?null:d.toISOString().slice(0,10)}
+function clean(text,flip){const rep={n:0,drop:0,dup:0};const lines=text.replace(/^\uFEFF/,'').split(/\r?\n/).filter(x=>x.trim());if(!lines.length)return{rows:[],rep};
+const cnt=d=>lines[0].split(d).length-1;const dl=[',',';','\t','|'].sort((a,b)=>cnt(b)-cnt(a))[0];rep.dl=dl;
+const rows=lines.map(l=>splitLine(l,dl)),n=rows[0].length;
+const hasH=!rows[0].some(c=>/\d{1,4}[\/.\-]\d{1,2}[\/.\-]\d{1,4}/.test(c));
+const hd=hasH?rows[0].map(x=>x.toLowerCase()):[],data=hasH?rows.slice(1):rows,used=new Set();
+const find=re=>{const i=hd.findIndex((x,k)=>!used.has(k)&&re.test(x));if(i>-1)used.add(i);return i};
+let ci={date:find(/date|posted|posting|^dt/),debit:find(/debit|withdraw|paid out|^dr$/),credit:find(/credit|deposit|paid in|^cr$/),amt:find(/amount|^amt|^value$|^sum|total/),desc:find(/desc|detail|narr|memo|particular|payee|remark|reference|^ref|text|note|name/)};
+if(!hasH||ci.date<0)ci={date:0,desc:1,amt:n-1,debit:-1,credit:-1};
+if(ci.amt<0&&ci.debit<0&&ci.credit<0)ci.amt=n-1;
+if(ci.desc<0){const k=[...Array(n).keys()].find(k=>k!==ci.date&&k!==ci.amt&&k!==ci.debit&&k!==ci.credit);ci.desc=k==null?1:k}
+const f=dateFmt(data.map(r=>r[ci.date]||''));rep.f=f;const seen=new Set(),out=[];
+data.forEach(r=>{rep.n++;const dt=parseDate(r[ci.date],f);let a=NaN;if(ci.amt>=0)a=parseNum(r[ci.amt]);
+if(isNaN(a)&&(ci.debit>=0||ci.credit>=0)){const d=ci.debit>=0?parseNum(r[ci.debit]):NaN,c=ci.credit>=0?parseNum(r[ci.credit]):NaN;if(!isNaN(d)||!isNaN(c))a=(isNaN(c)?0:Math.abs(c))-(isNaN(d)?0:Math.abs(d))}
+if(!dt||isNaN(a)){rep.drop++;return}
+if(flip)a=-a;a=Math.round(a*100)/100;const desc=(r[ci.desc]||'').replace(/\s+/g,' ').trim()||'(no description)';
+const key=dt+'|'+a+'|'+desc.toLowerCase();if(seen.has(key))rep.dup++;seen.add(key);out.push({date:dt,desc,amt:a})});
+return{rows:out,rep}}
+const raw={},reps={};
+function showRep(){const e=$('rep'),x=Object.values(reps);e.style.display=x.length?'block':'none';
+let h=x.map(r=>`<b>${r.name}</b>: ${r.n} rows read, ${r.drop} skipped (bad date or amount), ${r.dup} possible duplicates · delimiter ${r.dl==='\t'?'tab':r.dl} · dates read as ${r.f==='mdy'?'MM/DD':'DD/MM'}`).join('<br>');
+const neg=a=>a.filter(x=>x.amt<0).length>a.length/2;
+if(L.length&&B.length&&neg(L)!==neg(B))h+='<br>⚠ Ledger and bank signs look opposite. Try “Flip bank signs”.';
+e.innerHTML=h}
+function load(t){if(raw[t]==null)return;const{rows,rep}=clean(raw[t],t==='B'&&$('flip').checked);const a=rows.map((r,i)=>({...r,id:t+(i+1)}));if(t==='L')L=a;else B=a;ov={};rep.name=t==='L'?'Ledger':'Bank';reps[t]=rep;showRep();run()}
+function up(id,t){$(id).onchange=async e=>{const f=e.target.files[0];if(!f)return;raw[t]=await f.text();load(t)}}
+$('flip').onchange=()=>load('B');
+up('fl','L');up('fb','B');
+['t1','t2','t3','t4','t5'].forEach(i=>$(i).oninput=run);
+$('smp').onclick=()=>{ov={};raw.L=raw.B=null;for(const k in reps)delete reps[k];showRep();sample()};
+$('appr').onclick=()=>{R.filter(x=>x.st==='Review').forEach(x=>{ov[x.k]='Matched';x.st='Matched'});draw()};
+async function saveFile(name,text){
+const C=window.Capacitor;
+if(C&&C.isNativePlatform&&C.isNativePlatform()){try{const P=C.Plugins,r=await P.Filesystem.writeFile({path:name,data:text,directory:'CACHE',encoding:'utf8'});await P.Share.share({title:name,url:r.uri});return}catch(e){if(/cancel/i.test(String(e)))return}}
+const f=new File([text],name,{type:'text/csv'});
+if(/Android|iPhone|iPad/i.test(navigator.userAgent)&&navigator.canShare&&navigator.canShare({files:[f]})){try{await navigator.share({files:[f],title:name});return}catch(e){if(e.name==='AbortError')return}}
+const a=document.createElement('a');a.href=URL.createObjectURL(f);a.download=name;document.body.appendChild(a);a.click();a.remove()}
+$('exp').onclick=()=>{const q=v=>'"'+String(v).replace(/"/g,'""')+'"';const o=['ledger,bank,score,status'].concat(R.map(x=>[x.l?x.l.desc+' '+x.l.amt:'',x.b?x.b.desc+' '+x.b.amt:'',Math.round(x.sc*100),x.st].map(q).join(',')));
+saveFile('reconciliation.csv',o.join('\n'))};
+sample();
+</script>
+<script>if('serviceWorker' in navigator&&/^https?:/.test(location.protocol))addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))</script></body></html>
