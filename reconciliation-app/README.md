@@ -1,7 +1,6 @@
 # Smart Bank Reconciliation
 
-[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/YOUR_USERNAME/YOUR_REPO/blob/main/python/Smart_Bank_Reconciliation.ipynb)
-**Live web app:** https://YOUR_USERNAME.github.io/YOUR_REPO/  (replace YOUR_USERNAME and YOUR_REPO after you create the repository)
+url "https://github.com/Dawit360/reconciliation-app"
 
 Automates the manual audit of company transactions against bank statements.
 It cleans messy CSV exports, matches ledger entries to bank lines with a confidence score,
